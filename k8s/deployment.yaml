@@ -28,8 +28,8 @@ spec:
 
       containers:
         - name: wisecow
-          image: wisecow:v4
-          imagePullPolicy: Never
+          image: ghcr.io/2004pruthvi/wisecow:latest
+          imagePullPolicy: IfNotPresent
 
           ports:
             - name: http
