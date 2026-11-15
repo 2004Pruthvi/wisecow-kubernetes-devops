@@ -6,12 +6,14 @@ on:
       - main
     paths-ignore:
       - 'k8s/**'
+      - 'clusters/minikube/**'
 
   pull_request:
     branches:
       - main
     paths-ignore:
       - 'k8s/**'
+      - 'clusters/minikube/**'
 
 permissions:
   contents: read
