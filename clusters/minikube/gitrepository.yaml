@@ -9,5 +9,8 @@ spec:
 
   url: https://github.com/2004Pruthvi/wisecow-kubernetes-devops
 
+  secretRef:
+    name: wisecow-git-auth
+
   ref:
     branch: main

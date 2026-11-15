@@ -1,0 +1,33 @@
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: wisecow
+  namespace: flux-system
+
+spec:
+  interval: 1m
+
+  sourceRef:
+    kind: GitRepository
+    name: wisecow
+
+  git:
+    checkout:
+      ref:
+        branch: main
+
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        Update Wisecow container image
+
+        {{ .Changed.Summary }}
+
+    push:
+      branch: main
+
+  update:
+    path: ./k8s
+    strategy: Setters
