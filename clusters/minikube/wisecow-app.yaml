@@ -1,0 +1,15 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: wisecow
+  namespace: flux-system
+
+spec:
+  interval: 5m
+  path: ./k8s
+  prune: true
+  targetNamespace: default
+
+  sourceRef:
+    kind: GitRepository
+    name: wisecow
