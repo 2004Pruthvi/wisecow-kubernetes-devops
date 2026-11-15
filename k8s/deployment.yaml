@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: wisecow
-          image: ghcr.io/2004pruthvi/wisecow:latest@sha256:476783405c2733e91b3c9a6dfddfdf190351a8df71f74dd864678593b7a5a960 # {"$imagepolicy": "flux-system:wisecow"}
+          image: ghcr.io/2004pruthvi/wisecow:latest@sha256:67b4bbf6274f7f794773afc4f34ad909468b94142ccea17fece53de0ad87572b # {"$imagepolicy": "flux-system:wisecow"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
