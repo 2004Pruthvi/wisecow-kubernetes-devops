@@ -28,7 +28,7 @@ spec:
 
       containers:
         - name: wisecow
-          image: ghcr.io/2004pruthvi/wisecow:latest
+          image: ghcr.io/2004pruthvi/wisecow:latest # {"$imagepolicy": "flux-system:wisecow"}
           imagePullPolicy: IfNotPresent
 
           ports:
