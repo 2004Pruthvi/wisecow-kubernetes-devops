@@ -29,6 +29,7 @@
 - [Installation and Deployment Guide](#installation-and-deployment-guide)
 - [Verification and Observability](#verification-and-observability)
 - [Engineering Challenges and Solutions](#engineering-challenges-and-solutions)
+- [Problem Statement 2 – Linux System Monitoring and Application Health Automation](#problem-statement-2--linux-system-monitoring-and-application-health-automation)
 - [Skills Demonstrated](#skills-demonstrated)
 - [Future Improvements](#future-improvements)
 - [Author and Contact](#author-and-contact)
@@ -153,6 +154,9 @@ wisecow-kubernetes-devops/
 │   ├── ingress.yaml             # NGINX Ingress resource routing wisecow.local with TLS termination
 │   ├── kustomization.yaml       # Kustomize manifest aggregating deployment, service, and ingress
 │   └── service.yaml             # Kubernetes ClusterIP Service exposing port 80 -> container port 4499
+├── scripts/
+│   ├── application-health-checker.sh # HTTP/HTTPS application availability checker with TLS validation
+│   └── system-health-monitor.sh      # Linux host health monitor: CPU, RAM, Disk, and Process tracking
 ├── .gitignore                   # Excludes certificates (.crt, .key), environment files, and temporary pipes
 ├── Dockerfile                   # Hardened Debian Bookworm Slim Dockerfile executing as non-root UID 10001
 └── README.md                    # Comprehensive enterprise DevOps project documentation
@@ -162,6 +166,7 @@ wisecow-kubernetes-devops/
 - **`app/`**: Contains the source code of the Wisecow application and its license.
 - **`k8s/`**: Contains pure, declarative Kubernetes manifests defining the desired runtime state of the workload, bundled together via Kustomize.
 - **`clusters/minikube/`**: Contains Flux CD custom resources that drive the GitOps continuous delivery lifecycle and automated image updates.
+- **`scripts/`**: Houses standalone Linux automation and monitoring scripts for host health checks and synthetic HTTP/HTTPS application probes.
 - **`.github/workflows/`**: Houses the GitHub Actions workflow definition for continuous integration and automated vulnerability gating.
 
 ---
@@ -675,9 +680,182 @@ flux reconcile kustomization wisecow
 
 ---
 
+# Problem Statement 2 – Linux System Monitoring and Application Health Automation
+
+This section documents the implementation and validation of two standalone, dependency-free Bash automation scripts designed to solve critical operational challenges in infrastructure management: continuous host resource monitoring and synthetic application uptime validation.
+
+---
+
+## 1. Objective 1 – System Health Monitoring Script
+
+**File:** [`scripts/system-health-monitor.sh`](./scripts/system-health-monitor.sh)
+
+### Operational Context & Importance
+In production DevOps and Site Reliability Engineering (SRE) environments, proactive host monitoring is crucial to prevent cascading service outages. Undetected memory leaks, runaway background processes, disk volume saturation, or CPU starvation can destabilize underlying container host nodes, cause Kubernetes nodes to transition to a `NotReady` state, and trigger widespread pod evictions. 
+
+`system-health-monitor.sh` delivers immediate visibility into core system vitals and generates timestamped alert records without requiring complex, heavyweight third-party monitoring agents.
+
+### Implemented Capabilities
+- **CPU Utilization Monitoring:** Samples CPU idle time across two iterations using `top -bn2`, isolating the idle percentage and calculating exact CPU consumption (`100 - idle`) via `awk`.
+- **Memory Utilization Monitoring:** Queries `free -m` for total and available system memory, computing active memory usage percentage (`((total-available)/total)*100`) via `awk`.
+- **Disk Space Monitoring:** Evaluates root partition (`/`) utilization percentage via `df -P /`.
+- **Process Count Monitoring:** Counts all active system processes using `ps -e --no-headers | wc -l`.
+- **Configurable Alert Thresholds:** Evaluates sampled usage against configurable ceiling thresholds, logging normal status or raising high-priority `ALERT:` notifications.
+- **Timestamped Persistent Logging:** Outputs health metrics to standard output while appending ISO-formatted timestamped records (`[YYYY-MM-DD HH:MM:SS]`) to a persistent log file using `tee -a`.
+
+### Configuration & Thresholds
+Alert thresholds and log destinations are defined as configurable environment variables directly at the beginning of [`scripts/system-health-monitor.sh`](./scripts/system-health-monitor.sh):
+
+```bash
+# Alert thresholds
+CPU_THRESHOLD=80        # Alert when CPU usage exceeds 80%
+MEMORY_THRESHOLD=80     # Alert when memory usage exceeds 80%
+DISK_THRESHOLD=80       # Alert when disk usage exceeds 80%
+PROCESS_THRESHOLD=300   # Alert when total running processes exceed 300
+
+# Persistent log file destination
+LOG_FILE="$HOME/system-health.log"
+```
+
+### Execution Command
+Grant execute permissions and run the monitoring script:
+
+```bash
+chmod +x scripts/system-health-monitor.sh
+./scripts/system-health-monitor.sh
+```
+
+### Representative Output
+The following representative output was captured during host validation:
+
+```text
+========== SYSTEM HEALTH CHECK STARTED ==========
+CPU Usage: 0.3%
+CPU usage is normal: 0.3%
+Memory Usage: 23.2%
+Memory usage is normal: 23.2%
+Disk Usage: 2%
+Disk usage is normal: 2%
+Running Processes: 30
+Process count is normal: 30
+========== SYSTEM HEALTH CHECK COMPLETED ==========
+```
+
+> [!NOTE]
+> Actual metric values vary depending on the host machine specifications, operating system distribution, and active workload conditions.
+
+### Validation & Testing Results
+- **Bash Syntax Validation:** Passed static syntax validation without errors or warnings (`bash -n scripts/system-health-monitor.sh`).
+- **Baseline Execution:** Executed successfully on the Linux host; verified that normal usage reports were generated for CPU, memory, disk, and process metrics.
+- **Alert Trigger Simulation:** Verified alerting logic by temporarily configuring `CPU_THRESHOLD=0`. Upon execution, the script immediately generated the expected alert:
+  ```text
+  [2026-11-16 09:30:15] ALERT: High CPU usage: 0.3%
+  ```
+- **Threshold Restoration:** Confirmed that `CPU_THRESHOLD` was restored to its production baseline (`80`).
+- **Log Verification:** Confirmed that `~/system-health.log` was created automatically and that all evaluation events were recorded with ISO-8601 timestamps.
+
+---
+
+## 2. Objective 2 – Application Health Checker
+
+**File:** [`scripts/application-health-checker.sh`](./scripts/application-health-checker.sh)
+
+### Operational Context & CI/CD Pipeline Integration
+Host-level health does not guarantee application availability; a healthy server may host a crashed, deadlocked, or misconfigured application. The `application-health-checker.sh` script executes synthetic HTTP/HTTPS availability checks against any web service endpoint.
+
+**Pipeline & Operational Integration:**
+- **CI/CD Smoke Testing:** Can be integrated into deployment pipelines (e.g., GitHub Actions, GitLab CI, Jenkins) as an automated post-deployment verification gate. Because the script returns exit code `0` for `UP` and exit code `1` for `DOWN`, pipelines can automatically halt execution or trigger an automated rollback if the deployment fails health verification.
+- **Synthetic Monitoring / Cron Health Probes:** Can be scheduled as a periodic Linux cron job (`* * * * *`) or integrated with alerting systems (Slack, PagerDuty, email webhooks) to continuously verify external service availability.
+
+### Implemented Capabilities
+- **Command-Line Argument Parsing:** Accepts the target application URL as an input argument (`$1`), validating input presence and displaying usage instructions if omitted:
+  ```text
+  Usage: ./scripts/application-health-checker.sh <application-url>
+  ```
+- **HTTP/HTTPS Probing via `curl`:** Executes non-blocking availability checks with `-L` (follows redirects), `-sS` (silent mode with error output), and `-o /dev/null` (discards response payloads).
+- **HTTP Status Code Extraction:** Extracts the HTTP response status code via `-w "%{http_code}"`.
+- **HTTP 2xx Success Detection:** Matches responses against regex `^2[0-9][0-9]$` (e.g., `200 OK`, `201 Created`, `204 No Content`) to classify the application as `UP`.
+- **Failure & Timeout Detection:** Accurately classifies non-2xx responses (e.g., `404`, `500`, `502`, `503`) and connection dropouts/timeouts (status `000`) as `DOWN`.
+- **Configurable Network Timeouts:** Enforces connection timeout and maximum transfer time limits via `TIMEOUT=10` (`--connect-timeout 10` and `--max-time 10`) to prevent hanging processes.
+- **Default Strict TLS Verification:** Validates server TLS/SSL certificates against trusted Certificate Authorities by default (no insecure `-k` / `--insecure` flags).
+- **Timestamped Persistent Logging:** Appends structured health records to `~/application-health.log`.
+- **Deterministic Exit Codes:** Returns exit code `0` on successful `UP` status, and exit code `1` on `DOWN` status for automation compatibility.
+
+### Execution Commands
+Grant execute permissions and test endpoint availability:
+
+```bash
+chmod +x scripts/application-health-checker.sh
+
+# Probe target endpoint
+./scripts/application-health-checker.sh https://example.com
+```
+
+### Representative Output
+
+#### Successful Probe (HTTP 200 OK)
+```text
+Application URL: https://example.com
+Application Status: UP
+Application is responding successfully (HTTP 200)
+```
+
+#### Failure Probe (Unreachable / Timeout / Non-2xx)
+```text
+Application URL: http://127.0.0.1:9999
+Application Status: DOWN
+Application is unreachable or request timed out
+```
+
+### Validation & Testing Results
+- **Bash Syntax Verification:** Passed static syntax validation without errors (`bash -n scripts/application-health-checker.sh`).
+- **Prerequisite Validation:** Verified availability and compatibility of `curl` on the host environment.
+- **Public Trusted HTTPS Test:** Successfully probed public HTTPS endpoint (`https://example.com`), correctly classifying the service as `UP` with HTTP 200 and exit code `0`.
+- **Unreachable Service Test:** Tested against non-existent local endpoint (`http://127.0.0.1:9999`), correctly detecting connection refusal, classifying the service as `DOWN`, and returning exit code `1`.
+- **Strict TLS Rejection Test (Wisecow Minikube Endpoint):** Probed the local Wisecow deployment (`https://wisecow.local`). Because the local Minikube cluster utilizes an OpenSSL self-signed certificate rather than a public CA certificate, `curl` rejected the untrusted certificate and accurately reported the endpoint as `DOWN`, validating that default TLS security controls are actively enforced.
+- **Log Verification:** Confirmed that all probe events and timestamps were accurately recorded in `~/application-health.log`.
+
+> [!IMPORTANT]
+> **Critical Security Note on TLS Verification:**  
+> The script intentionally avoids passing the `-k` (`--insecure`) flag to `curl`. Disabling TLS certificate validation in production scripts introduces critical vulnerabilities, including exposure to Man-in-the-Middle (MITM) attacks and DNS spoofing. The verification failure on the local Wisecow endpoint is expected behavior because it uses an internal self-signed development certificate rather than a public Certificate Authority.
+
+---
+
+## 3. Automation Scripts Repository Structure
+
+The automation scripts are located in the dedicated [`scripts/`](./scripts) directory within the repository:
+
+```text
+wisecow-kubernetes-devops/
+├── scripts/
+│   ├── system-health-monitor.sh       # Linux host resource monitor (CPU, Memory, Disk, Processes)
+│   └── application-health-checker.sh  # HTTP/HTTPS availability & TLS uptime checker
+├── app/                               # Wisecow microservice application code & prompt
+├── k8s/                               # Kubernetes declarative workload & Ingress manifests
+├── clusters/                          # Flux CD GitOps continuous delivery manifests
+├── .github/                           # GitHub Actions CI/CD workflows
+└── README.md                          # Project & operational documentation
+```
+
+---
+
+## 4. Skills Demonstrated in Problem Statement 2
+
+- **Linux System Administration:** Host resource inspection, process table management, filesystem space auditing, and unprivileged user execution.
+- **Bash Scripting:** Clean POSIX/Bash syntax, modular functions, robust parameter handling, and `awk` string/numerical processing.
+- **Process and Resource Monitoring:** Metrics collection from `/proc`, `top`, `free`, `df`, and `ps`.
+- **HTTP/HTTPS Troubleshooting:** Synthetic transaction probing, redirect navigation (`-L`), and HTTP status code interpretation.
+- **TLS Certificate Validation:** Strict SSL/TLS certificate checking, preventing insecure bypasses in production workflows.
+- **Logging and Error Handling:** Timestamped event logging (`tee -a`), simultaneous stdout display, and input argument validation.
+- **Exit-Code-Based Automation:** Deterministic binary exit statuses (`0` for success, `1` for failure) enabling seamless CI/CD pipeline integration.
+- **Git and GitHub Version Control:** Git branch management, atomic commits, and repository organization.
+
+---
+
 ## Skills Demonstrated
 
 - **Linux Systems Engineering:** Bash scripting, process pipelines, named pipes (`mkfifo`), systemd/process signals, user/group privilege isolation (UID 10001).
+- **System & Application Health Automation:** Host resource inspection (CPU, Memory, Disk, Processes), HTTP/HTTPS availability checking, TLS certificate validation, exit-code automation, timestamped logging (`~/system-health.log`, `~/application-health.log`).
 - **Container Engineering:** Multi-stage Dockerfile design, minimal base images (`debian:bookworm-slim`), Docker Buildx, layer caching, non-root user execution.
 - **Kubernetes Orchestration:** Deployments, ClusterIP Services, Ingress, Kustomize overlays, resource quotas (requests/limits), TCP liveness/readiness health probes.
 - **GitOps & Continuous Delivery:** Flux CD v2 (`source-controller`, `kustomize-controller`, `image-reflector-controller`, `image-automation-controller`), automated Git reconciliation, automated manifest write-backs.
